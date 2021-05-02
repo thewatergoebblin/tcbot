@@ -11,21 +11,23 @@ import (
 const TcHost = "https://tinychat.com"
 
 type tcClient struct {
-	host    string
-	cookies map[string]string
+	cookies []*http.Cookie
 }
 
 func Login(username string, password string) tcClient {
+	return LoginAndRedirect(username, password, "")
+}
 
-	const redirectUrl = TcHost + "/home"
-
-	doc, cookies := loadSignOnData(redirectUrl)
+func LoginAndRedirect(username string, password string, redirect string) tcClient {
+	doc, cookies := loadSignOnData(redirect)
 
 	token := parseLoginToken(doc)
-
-	request := buildLoginRequest(username, password, token, cookies)
-	client := &http.Client{}
-
+	request := buildLoginRequest(username, password, redirect, token, cookies)
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(request)
 	if err != nil {
 		log.Panic("shit")
@@ -33,33 +35,21 @@ func Login(username string, password string) tcClient {
 
 	defer resp.Body.Close()
 
-	//body, err := io.ReadAll(resp.Body)
-	//if err != nil {
-	//	log.Panic("error happened")
-	//}
-
-	//bodyStr := string(body)
-	//log.Print("result: " + bodyStr)
-
-	log.Print("-status: " + resp.Status)
-
-	return tcClient{username, make(map[string]string)}
+	return tcClient{resp.Cookies()}
 }
 
-func buildLoginRequest(username string, password string, token string, cookies []*http.Cookie) *http.Request {
+func buildLoginRequest(username string, password string, redirect, token string, cookies []*http.Cookie) *http.Request {
 	const url = TcHost + "/login"
-	formData := makeLoginForm(username, password, token)
+	formData := makeLoginForm(username, password, redirect, token)
 	formDataEncoded := formData.Encode()
 	request, err := http.NewRequest("POST", url, strings.NewReader(formDataEncoded))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	log.Print("request: " + formDataEncoded)
 	if err != nil {
 		log.Panic("error happened")
 	}
 	for _, cookie := range cookies {
 		request.AddCookie(cookie)
 	}
-
 	return request
 }
 
@@ -90,12 +80,12 @@ func parseLoginToken(doc *goquery.Document) string {
 	return token
 }
 
-func makeLoginForm(username string, password string, token string) url.Values {
+func makeLoginForm(username string, password string, redirect string, token string) url.Values {
 	return url.Values{
 		"login_username": {username},
 		"login_password": {password},
 		"remember":       {"1"},
-		"next":           {"https://tinychat.com/home"},
+		"next":           {redirect},
 		"_token":         {token},
 	}
 }
