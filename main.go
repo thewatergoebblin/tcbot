@@ -1,9 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"gobot/tc"
 	"io/ioutil"
+	"log"
 	"strings"
 )
 
@@ -16,7 +16,7 @@ func main() {
 func readPasswordFile(fileName string) (username string, password string, nickname string) {
 	result, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		fmt.Println("shit")
+		log.Panic("Failed to read password file: ", err)
 	}
 	resultStr := string(result)
 	credentials := strings.Fields(resultStr)

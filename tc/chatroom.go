@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 )
 
@@ -26,28 +25,55 @@ type ChatroomJoin struct {
 	Nick      string `json:"nick"`
 }
 
+type User struct {
+	AchievementUrl string `json:"achievement_url"`
+	Avatar         string `json:"avatar"`
+	Featured       bool   `json:"featured"`
+	giftPoints     string `json:"giftpoints"`
+	Handle         int    `json:"handle"`
+	Lurker         bool   `json:"lurker"`
+	Mod            bool   `json:"mod"`
+	Nick           string `json:"nick"`
+	Owner          bool   `json:"owner"`
+	SessionId      string `json:"session_id"`
+	Subscription   int    `json:"subscription"`
+	Username       string `json:"username"`
+}
+
+type ChatroomState struct {
+	userNameMap   map[string]*User
+	userHandleMap map[int]*User
+}
+
 const TcTokenUrl = "/api/v1.0/room/token/"
 
 var done chan interface{}
 var interrupt chan os.Signal
 
 func JoinChatroom(username string, password string, nickname string, chatroom string) {
+
+	log.Print("----- Logging In -----")
+
 	tcClient := Login(username, password)
+
+	log.Print("----- Loading Chatroom Connection Data -----")
 
 	connectionData := loadChatroomConnectionData(&tcClient, chatroom)
 
-	connectToChatroom(username, nickname, chatroom, &connectionData, tcClient.cookies)
+	log.Print("------ Joining to Chatroom -----")
+
+	connectToChatroom(username, nickname, chatroom, &connectionData)
 }
 
-func loadChatroomConnectionData(client *tcClient, chatroom string) ChatroomConnectionData {
+func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomConnectionData {
 	tokenUrl := TcHost + TcTokenUrl + chatroom
 
 	request, err := http.NewRequest("GET", tokenUrl, nil)
 	if err != nil {
-		log.Panic("aaaaaaa")
+		log.Panic("Failed to load chatroom connection data - constructing request object failed: ", err)
 	}
 
-	for _, cookie := range client.cookies {
+	for _, cookie := range tcClient.cookies {
 		request.AddCookie(cookie)
 	}
 
@@ -55,48 +81,43 @@ func loadChatroomConnectionData(client *tcClient, chatroom string) ChatroomConne
 
 	resp, err := requestClient.Do(request)
 	if err != nil {
-		log.Panic("bitch")
+		log.Panic("Failed to load chatroom connection data - request failed: ", err)
 	}
 	defer resp.Body.Close()
 
 	rawData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Panic("bitch")
+		log.Panic("Failed to load chatroom connection data - ", err)
 	}
 	var data ChatroomConnectionData
 	json.Unmarshal(rawData, &data)
 	return data
 }
 
-func connectToChatroom(username string, nickname string, chatroom string, connectionData *ChatroomConnectionData, cookies []*http.Cookie) {
+func connectToChatroom(username string, nickname string, chatroom string, connectionData *ChatroomConnectionData) {
 	done = make(chan interface{})
 	interrupt = make(chan os.Signal)
 
 	signal.Notify(interrupt, os.Interrupt)
 
-	log.Print("connecting to: " + connectionData.Endpoint)
-	log.Printf("n cookies: %f", len(cookies))
-
-	cookieHeader := buildCookieHeader(cookies)
-
-	log.Print("cookieHeader: " + cookieHeader)
-
-	httpHeaders := http.Header{}
-	httpHeaders.Add("Cookie", cookieHeader)
-
-	conn, _, err := websocket.DefaultDialer.Dial(connectionData.Endpoint, httpHeaders)
+	conn, _, err := websocket.DefaultDialer.Dial(connectionData.Endpoint, nil)
 	if err != nil {
-		log.Fatal("Error connecting to Websocket Server:", err)
+		log.Fatal("Error connecting to chatroom - websocket connection failed: ", err)
 	}
 
 	defer conn.Close()
 
-	go receiveHandler(conn)
+	chatroomState := ChatroomState{
+		userNameMap:   make(map[string]*User),
+		userHandleMap: make(map[int]*User),
+	}
+
+	go receiveHandler(&chatroomState, conn)
 
 	chatroomJoin := ChatroomJoin{
 		Tc:        "join",
 		Req:       1,
-		Useragent: "tinychat-client-webrtc-undefined_linux x86_64-2.0.20-420",
+		Useragent: "DoD Missile Silo",
 		Token:     connectionData.Result,
 		Room:      chatroom,
 		Nick:      nickname,
@@ -106,22 +127,12 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 
 	for {
 		select {
-		case <-time.After(time.Duration(1) * time.Millisecond * 1000):
-			// Send an echo packet every second
-			err := conn.WriteMessage(websocket.TextMessage, []byte("Hello from GolangDocs!"))
-			if err != nil {
-				log.Println("Error during writing to websocket:", err)
-				return
-			}
-
 		case <-interrupt:
-			// We received a SIGINT (Ctrl + C). Terminate gracefully...
 			log.Println("Received SIGINT interrupt signal. Closing all pending connections")
-
-			// Close our websocket connection
-			err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			err := conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
-				log.Println("Error during closing websocket:", err)
+				log.Panic("Error during closing websocket:", err)
 				return
 			}
 
@@ -136,39 +147,31 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 	}
 }
 
-func receiveHandler(connection *websocket.Conn) {
+func receiveHandler(state *ChatroomState, connection *websocket.Conn) {
 	defer close(done)
+	var payload map[string]interface{}
 	for {
-		_, msg, err := connection.ReadMessage()
+		err := connection.ReadJSON(&payload)
 		if err != nil {
-			log.Println("Error in receive:", err)
-			return
+			log.Panic("Error in receive:", err)
 		}
-		log.Printf("Received: %s\n", msg)
+		readInboundMessage(state, payload)
 	}
 }
 
 func sendJoin(conn *websocket.Conn, joinData ChatroomJoin) {
-	//bytes, err := json.Marshal(joinData)
-	//log.Print("sending: " + string(bytes))
-	//if err != nil {
-	//	panic(err)
-	//}
 	err := conn.WriteJSON(joinData)
 	if err != nil {
-		panic(err)
+		log.Panic("Failed to send join message: ", err)
 	}
-	//log.Print("sending request body: " + string(bytes))
 }
 
-func buildCookieHeader(cookies []*http.Cookie) string {
-	rawCookies := []string{}
-	for _, cookie := range cookies {
-		if cookie.Name == "hash" || cookie.Name == "pass" || cookie.Name == "user" {
-			c := cookie.Name + ":" + cookie.Value
-			log.Print("raw cookie: " + c)
-			rawCookies = append(rawCookies, c)
-		}
+func readInboundMessage(state *ChatroomState, payload map[string]interface{}) {
+	tc := payload["tc"].(string)
+	switch tc {
+	case "userlist":
+		log.Print("got userlist")
+	default:
+		log.Print("warning - unhandled tc message type: ", tc)
 	}
-	return strings.Join(rawCookies, "; ")
 }
