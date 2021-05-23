@@ -42,6 +42,7 @@ func buildLoginRequest(username string, password string, redirect, token string,
 	const url = TcHost + "/login"
 	formData := makeLoginForm(username, password, redirect, token)
 	formDataEncoded := formData.Encode()
+	log.Print("body: " + formDataEncoded)
 	request, err := http.NewRequest("POST", url, strings.NewReader(formDataEncoded))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if err != nil {
