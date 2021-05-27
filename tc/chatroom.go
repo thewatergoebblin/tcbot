@@ -25,6 +25,11 @@ type ChatroomJoin struct {
 	Nick      string `json:"nick"`
 }
 
+type Pong struct {
+	Tc  string `json:"tc"`
+	Req int    `json:"req"`
+}
+
 type User struct {
 	AchievementUrl string `json:"achievement_url"`
 	Avatar         string `json:"avatar"`
@@ -49,6 +54,7 @@ const TcTokenUrl = "/api/v1.0/room/token/"
 
 var done chan interface{}
 var interrupt chan os.Signal
+var pong chan interface{}
 
 func JoinChatroom(username string, password string, nickname string, chatroom string) {
 
@@ -98,6 +104,8 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 	done = make(chan interface{})
 	interrupt = make(chan os.Signal)
 
+	reqCounter := 1
+
 	signal.Notify(interrupt, os.Interrupt)
 
 	conn, _, err := websocket.DefaultDialer.Dial(connectionData.Endpoint, nil)
@@ -116,7 +124,7 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 
 	chatroomJoin := ChatroomJoin{
 		Tc:        "join",
-		Req:       1,
+		Req:       reqCounter,
 		Useragent: "DoD Missile Silo",
 		Token:     connectionData.Result,
 		Room:      chatroom,
@@ -125,8 +133,13 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 
 	sendJoin(conn, chatroomJoin)
 
+	reqCounter++
+
 	for {
 		select {
+		case <-pong:
+			sendPong(conn, reqCounter)
+			reqCounter++
 		case <-interrupt:
 			log.Println("Received SIGINT interrupt signal. Closing all pending connections")
 			err := conn.WriteMessage(websocket.CloseMessage,
@@ -149,12 +162,14 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 
 func receiveHandler(state *ChatroomState, connection *websocket.Conn) {
 	defer close(done)
-	var payload map[string]interface{}
 	for {
+		var payload map[string]interface{}
 		err := connection.ReadJSON(&payload)
 		if err != nil {
 			log.Panic("Error in receive:", err)
 		}
+		b, _ := json.Marshal(payload)
+		log.Println(string(b))
 		readInboundMessage(state, payload)
 	}
 }
@@ -170,8 +185,36 @@ func readInboundMessage(state *ChatroomState, payload map[string]interface{}) {
 	tc := payload["tc"].(string)
 	switch tc {
 	case "userlist":
-		log.Print("got userlist")
+		readUserData(payload)
+	case "joined":
+		return
+	case "ping":
+		pong <- "pong"
 	default:
 		log.Print("warning - unhandled tc message type: ", tc)
+	}
+}
+
+func readUserData(payload map[string]interface{}) User {
+	usersJson := payload["users"].([]interface{})
+	for _, userInt := range usersJson {
+		user := userInt.(map[string]interface{})
+		u := User{
+			AchievementUrl: user["achievement_url"].(string),
+		}
+		log.Println("user: ", u.AchievementUrl)
+	}
+	return User{}
+}
+
+func sendPong(conn *websocket.Conn, req int) {
+	log.Printf("sending pong %d\n", req)
+	pongReq := Pong{
+		Tc:  "pong",
+		Req: req,
+	}
+	err := conn.WriteJSON(pongReq)
+	if err != nil {
+		log.Panic("Failed to send pong message: ", err)
 	}
 }
