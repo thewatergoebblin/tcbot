@@ -103,6 +103,7 @@ func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomCon
 func connectToChatroom(username string, nickname string, chatroom string, connectionData *ChatroomConnectionData) {
 	done = make(chan interface{})
 	interrupt = make(chan os.Signal)
+	pong = make(chan interface{})
 
 	reqCounter := 1
 
