@@ -2,6 +2,7 @@ package tc
 
 import (
 	"github.com/PuerkitoBio/goquery"
+	"golang.org/x/net/proxy"
 	"log"
 	"net/http"
 	"net/url"
@@ -12,30 +13,42 @@ const TcHost = "https://tinychat.com"
 
 type TcClient struct {
 	cookies []*http.Cookie
+	client  *http.Client
+	tcProxy *TcProxy
 }
 
-func Login(username string, password string) TcClient {
-	return LoginAndRedirect(username, password, "")
+type TcProxy struct {
+	Host     string
+	Username string
+	Password string
 }
 
-func LoginAndRedirect(username string, password string, redirect string) TcClient {
-	doc, cookies := loadSignOnData(redirect)
+func Login(tcProxy *TcProxy, username string, password string) TcClient {
+	return LoginAndRedirect(tcProxy, username, password, "")
+}
 
+func LoginProxy(tcProxy *TcProxy, username string, password string) TcClient {
+	return LoginAndRedirect(tcProxy, username, password, "")
+}
+
+func LoginAndRedirect(tcProxy *TcProxy, username string, password string, redirect string) TcClient {
+	client := buildHttpClient(tcProxy)
+	doc, cookies := loadSignOnData(client, redirect)
 	token := parseLoginToken(doc)
 	request := buildLoginRequest(username, password, redirect, token, cookies)
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
 	resp, err := client.Do(request)
+
 	if err != nil {
 		log.Panic("Failed to login to tinychat - request failed: ", err)
 	}
 
 	defer resp.Body.Close()
 
-	return TcClient{resp.Cookies()}
+	return TcClient{
+		cookies: resp.Cookies(),
+		client:  client,
+		tcProxy: tcProxy,
+	}
 }
 
 func buildLoginRequest(username string, password string, redirect, token string, cookies []*http.Cookie) *http.Request {
@@ -56,9 +69,9 @@ func buildLoginRequest(username string, password string, redirect, token string,
 	return request
 }
 
-func loadSignOnData(redirect string) (*goquery.Document, []*http.Cookie) {
+func loadSignOnData(client *http.Client, redirect string) (*goquery.Document, []*http.Cookie) {
 	url := TcHost + "/start?" + redirect
-	resp, err := http.Get(url)
+	resp, err := client.Get(url)
 
 	if err != nil {
 		log.Panic("Failed to load initial tinychat page - request failed", err)
@@ -89,5 +102,29 @@ func makeLoginForm(username string, password string, redirect string, token stri
 		"remember":       {"1"},
 		"next":           {redirect},
 		"_token":         {token},
+	}
+}
+
+func buildHttpClient(tcProxy *TcProxy) *http.Client {
+	if tcProxy != nil {
+		dialSocksProxy, err := proxy.SOCKS5("tcp", tcProxy.Host, nil, nil)
+		if err != nil {
+			log.Panic("Failed to create proxy object")
+		}
+		transport := http.Transport{
+			Dial: dialSocksProxy.Dial,
+		}
+		return &http.Client{
+			Transport: &transport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+	} else {
+		return &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 }
