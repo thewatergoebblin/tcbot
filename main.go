@@ -10,7 +10,12 @@ import (
 func main() {
 	const passwordFile = "password.pwd"
 	username, password, nickname := readPasswordFile(passwordFile)
-	tc.JoinChatroom(username, password, nickname, "littlebunny")
+
+	tcProxy := tc.TcProxy{
+		Host: "localhost:9050",
+	}
+
+	tc.JoinChatroom(&tcProxy, username, password, nickname, "littlebunny")
 }
 
 func readPasswordFile(fileName string) (username string, password string, nickname string) {

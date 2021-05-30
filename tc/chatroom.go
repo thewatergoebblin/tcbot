@@ -3,6 +3,7 @@ package tc
 import (
 	"encoding/json"
 	"github.com/gorilla/websocket"
+	"golang.org/x/net/proxy"
 	"io"
 	"log"
 	"net/http"
@@ -56,11 +57,11 @@ var done chan interface{}
 var interrupt chan os.Signal
 var pong chan interface{}
 
-func JoinChatroom(username string, password string, nickname string, chatroom string) {
+func JoinChatroom(tcProxy *TcProxy, username string, password string, nickname string, chatroom string) {
 
 	log.Print("----- Logging In -----")
 
-	tcClient := Login(username, password)
+	tcClient := Login(tcProxy, username, password)
 
 	log.Print("----- Loading Chatroom Connection Data -----")
 
@@ -68,7 +69,7 @@ func JoinChatroom(username string, password string, nickname string, chatroom st
 
 	log.Print("------ Joining to Chatroom -----")
 
-	connectToChatroom(username, nickname, chatroom, &connectionData)
+	connectToChatroom(&tcClient, username, nickname, chatroom, &connectionData)
 }
 
 func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomConnectionData {
@@ -83,9 +84,7 @@ func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomCon
 		request.AddCookie(cookie)
 	}
 
-	requestClient := &http.Client{}
-
-	resp, err := requestClient.Do(request)
+	resp, err := tcClient.client.Do(request)
 	if err != nil {
 		log.Panic("Failed to load chatroom connection data - request failed: ", err)
 	}
@@ -100,7 +99,7 @@ func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomCon
 	return data
 }
 
-func connectToChatroom(username string, nickname string, chatroom string, connectionData *ChatroomConnectionData) {
+func connectToChatroom(tcClient *TcClient, username string, nickname string, chatroom string, connectionData *ChatroomConnectionData) {
 	done = make(chan interface{})
 	interrupt = make(chan os.Signal)
 	pong = make(chan interface{})
@@ -109,7 +108,20 @@ func connectToChatroom(username string, nickname string, chatroom string, connec
 
 	signal.Notify(interrupt, os.Interrupt)
 
-	conn, _, err := websocket.DefaultDialer.Dial(connectionData.Endpoint, nil)
+	var dialer websocket.Dialer
+
+	if tcClient.tcProxy == nil {
+		dialer = websocket.Dialer{}
+	} else {
+		log.Print("Going through tor")
+		proxyDialer, err := proxy.SOCKS5("tcp", "localhost:9050", nil, nil)
+		if err != nil {
+			log.Panic("proxy error")
+		}
+		dialer = websocket.Dialer{NetDial: proxyDialer.Dial}
+	}
+
+	conn, _, err := dialer.Dial(connectionData.Endpoint, nil)
 	if err != nil {
 		log.Fatal("Error connecting to chatroom - websocket connection failed: ", err)
 	}
