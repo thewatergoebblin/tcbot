@@ -74,7 +74,7 @@ func loadSignOnData(client *http.Client, redirect string) (*goquery.Document, []
 	resp, err := client.Get(url)
 
 	if err != nil {
-		log.Panic("Failed to load initial tinychat page - request failed", err)
+		log.Panic("Failed to load initial tinychat page - request failed: ", err)
 	}
 
 	defer resp.Body.Close()

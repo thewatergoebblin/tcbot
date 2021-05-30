@@ -95,7 +95,10 @@ func loadChatroomConnectionData(tcClient *TcClient, chatroom string) ChatroomCon
 		log.Panic("Failed to load chatroom connection data - ", err)
 	}
 	var data ChatroomConnectionData
-	json.Unmarshal(rawData, &data)
+	err = json.Unmarshal(rawData, &data)
+	if err != nil {
+		log.Panic("Failed to load chatroom connection data - parsing json failed - ", err)
+	}
 	return data
 }
 
@@ -113,10 +116,10 @@ func connectToChatroom(tcClient *TcClient, username string, nickname string, cha
 	if tcClient.tcProxy == nil {
 		dialer = websocket.Dialer{}
 	} else {
-		log.Print("Going through tor")
+		log.Print("Connecting over socks5 proxy")
 		proxyDialer, err := proxy.SOCKS5("tcp", "localhost:9050", nil, nil)
 		if err != nil {
-			log.Panic("proxy error")
+			log.Panic("Failed to construct proxy dialer", err)
 		}
 		dialer = websocket.Dialer{NetDial: proxyDialer.Dial}
 	}
