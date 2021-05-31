@@ -291,9 +291,10 @@ func handlePublish(state *ChatroomState, payload map[string]interface{}) {
 
 func handleUnpublish(state *ChatroomState, payload map[string]interface{}) {
 	handle := int(payload["handle"].(float64))
-	user := state.userHandleMap[handle]
-	log.Printf("user %s:%s cammed down\n", user.Username, user.Nick)
-	delete(state.userCamMap, handle)
+	if user, exists := state.userHandleMap[handle]; exists {
+		delete(state.userCamMap, handle)
+		log.Printf("user %s:%s cammed down\n", user.Username, user.Nick)
+	}
 }
 
 func handleMessage(state *ChatroomState, payload map[string]interface{}) {

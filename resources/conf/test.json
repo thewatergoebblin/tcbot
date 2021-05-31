@@ -1,6 +1,6 @@
 {
   "proxy": {
-    "host": "localhost:9050"
+    "host": "47.90.132.228:8800"
   },
   "passwordFile": "password.pwd",
   "defaultChatroom": "littlebunny"
