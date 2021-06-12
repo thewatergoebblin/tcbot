@@ -12,9 +12,11 @@ import (
 const TcHost = "https://tinychat.com"
 
 type TcClient struct {
-	cookies []*http.Cookie
-	client  *http.Client
-	tcProxy *TcProxy
+	username string
+	password string
+	cookies  []*http.Cookie
+	client   *http.Client
+	tcProxy  *TcProxy
 }
 
 type TcProxy struct {
@@ -45,9 +47,11 @@ func LoginAndRedirect(tcProxy *TcProxy, username string, password string, redire
 	defer resp.Body.Close()
 
 	return TcClient{
-		cookies: resp.Cookies(),
-		client:  client,
-		tcProxy: tcProxy,
+		username: username,
+		password: password,
+		cookies:  resp.Cookies(),
+		client:   client,
+		tcProxy:  tcProxy,
 	}
 }
 

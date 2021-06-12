@@ -140,7 +140,7 @@ func connectToChatroom(tcClient *TcClient, username string, nickname string, cha
 		userCamMap:    make(map[int]*User),
 	}
 
-	go receiveHandler(&chatroomState, conn)
+	go chatroomState.receiveHandler(conn)
 
 	chatroomJoin := ChatroomJoin{
 		Tc:        "join",
@@ -180,7 +180,7 @@ func connectToChatroom(tcClient *TcClient, username string, nickname string, cha
 	}
 }
 
-func receiveHandler(state *ChatroomState, connection *websocket.Conn) {
+func (state ChatroomState) receiveHandler(connection *websocket.Conn) {
 	defer close(done)
 	for {
 		var payload map[string]interface{}
@@ -194,7 +194,7 @@ func receiveHandler(state *ChatroomState, connection *websocket.Conn) {
 			log.Println("Error marshalling json data: ", string(raw),
 				" with error: ", err)
 		}
-		readInboundMessage(state, payload, rawStr)
+		state.readInboundMessage(payload, rawStr)
 	}
 }
 
@@ -205,41 +205,43 @@ func sendJoin(conn *websocket.Conn, joinData ChatroomJoin) {
 	}
 }
 
-func readInboundMessage(state *ChatroomState, payload map[string]interface{},
+func (state ChatroomState) readInboundMessage(payload map[string]interface{},
 	raw string) {
 	tc := payload["tc"].(string)
 	switch tc {
 	case "userlist":
-		readUserData(state, payload)
+		state.readUserData(payload)
 		return
 	case "join":
-		handleJoin(state, payload)
+		state.handleJoin(payload)
 		return
 	case "quit":
-		handleQuit(state, payload)
+		state.handleQuit(payload)
 		return
 	case "publish":
-		handlePublish(state, payload)
+		state.handlePublish(payload)
 		return
 	case "unpublish":
-		handleUnpublish(state, payload)
+		state.handleUnpublish(payload)
 		return
 	case "ping":
 		pong <- "pong"
 	case "msg":
-		handleMessage(state, payload)
+		state.handleMessage(payload)
+		return
+	case "joined":
 		return
 	default:
 		log.Print("warning - unhandled tc message type: ", tc, " raw: ", raw)
 	}
 }
 
-func readUserData(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) readUserData(payload map[string]interface{}) {
 	usersJson := payload["users"].([]interface{})
 	for _, userInt := range usersJson {
 		userMap := userInt.(map[string]interface{})
 		user := parseUser(userMap)
-		addUserToState(state, user)
+		state.addUser(user)
 	}
 }
 
@@ -272,24 +274,24 @@ func parseUser(userMap map[string]interface{}) *User {
 	}
 }
 
-func handleJoin(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) handleJoin(payload map[string]interface{}) {
 	user := parseUser(payload)
-	addUserToState(state, user)
+	state.addUser(user)
 }
 
-func handleQuit(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) handleQuit(payload map[string]interface{}) {
 	handle := int(payload["handle"].(float64))
-	removeUserFromState(state, handle)
+	state.removeUser(handle)
 }
 
-func handlePublish(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) handlePublish(payload map[string]interface{}) {
 	handle := int(payload["handle"].(float64))
 	user := state.userHandleMap[handle]
 	state.userCamMap[handle] = user
 	log.Printf("user %s:%s cammed up\n", user.Username, user.Nick)
 }
 
-func handleUnpublish(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) handleUnpublish(payload map[string]interface{}) {
 	handle := int(payload["handle"].(float64))
 	if user, exists := state.userHandleMap[handle]; exists {
 		delete(state.userCamMap, handle)
@@ -297,21 +299,21 @@ func handleUnpublish(state *ChatroomState, payload map[string]interface{}) {
 	}
 }
 
-func handleMessage(state *ChatroomState, payload map[string]interface{}) {
+func (state ChatroomState) handleMessage(payload map[string]interface{}) {
 	handle := int(payload["handle"].(float64))
 	text := payload["text"].(string)
 	user := state.userHandleMap[handle]
 	log.Printf("message from: %s:%s :: %s\n", user.Username, user.Nick, text)
 }
 
-func addUserToState(state *ChatroomState, user *User) {
+func (state ChatroomState) addUser(user *User) {
 	state.userNameMap[user.Username] = user
 	state.userNickMap[user.Nick] = user
 	state.userHandleMap[user.Handle] = user
 	log.Printf("user joined: %s:%s\n", user.Username, user.Nick)
 }
 
-func removeUserFromState(state *ChatroomState, handle int) {
+func (state ChatroomState) removeUser(handle int) {
 	user := state.userHandleMap[handle]
 	delete(state.userHandleMap, handle)
 	delete(state.userNickMap, user.Nick)
@@ -320,4 +322,8 @@ func removeUserFromState(state *ChatroomState, handle int) {
 		delete(state.userCamMap, handle)
 	}
 	log.Printf("user quit: %s:%s\n", user.Username, user.Nick)
+}
+
+func (state ChatroomState) handleJoined(payload map[string]interface{}) {
+	//TODO: implement
 }
